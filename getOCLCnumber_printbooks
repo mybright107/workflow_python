@@ -1,0 +1,89 @@
+#This Python script retrieves matching OCLC records based on defined parameters and is specifically designed for print books. It is used for Alma brief level 04 records that lack an OCLC number.
+
+import os
+import requests
+import pandas as pd
+
+# 👇 Set working directory
+os.chdir(r"C:/[YOUR FILE DIRECTORY]")
+
+# Input / output files .xlsx format 
+input_file = "[input file name]"
+output_file = "[output file name]"
+
+# Load Excel
+df = pd.read_excel(input_file)
+
+# Prepare results list
+results = []
+
+# Your OCLC Access Token
+OCLC_TOKEN = "[YOUR OCLC TOKEN]"
+
+# Iterate over each row in the Excel
+for _, row in df.iterrows():
+    title = str(row["ti:"]).strip() if not pd.isna(row["ti:"]) else ""
+    date_published = str(row["datePublished"]).strip() if not pd.isna(row["datePublished"]) else ""
+    inLanguage = str(row["In:"]).strip() if not pd.isna(row["In:"]) else ""
+
+    if not title:
+        continue
+
+    # Build query string
+    query = f'ti:{title}'
+    
+
+    url = "https://americas.discovery.api.oclc.org/worldcat/search/v2/bibs"
+    params = {
+        "q": query,
+        "inLanguage": inLanguage,
+        "datePublished": date_published,   # ✅ separate param. make sure to update the params depending on your search query needs
+        "inCatalogLanguage": "eng",
+        "itemSubType": "book-printbook",
+        "orderBy": "mostWidelyHeld",
+        "limit": 1
+    }
+    headers = {
+        "Accept": "application/json",
+        "Authorization": f"Bearer {OCLC_TOKEN}"
+    }
+
+    try:
+        response = requests.get(url, headers=headers, params=params)
+        response.raise_for_status()
+        data = response.json()
+
+        oclc_num = ""
+        main_titles = ""
+
+        if data.get("numberOfRecords", 0) > 0:
+            record = data["bibRecords"][0]
+
+            # ✅ FIXED: identifier is an object, not a list
+            oclc_num = record.get("identifier", {}).get("oclcNumber", "")
+
+            if "title" in record and "mainTitles" in record["title"]:
+                main_titles = "; ".join([t["text"] for t in record["title"]["mainTitles"]])
+
+        results.append({
+            "Local_Title": title,
+            "OCLC_Number": oclc_num,
+            "OCLC_Title": main_titles
+        })
+
+        print(f"✔ {title} → {oclc_num if oclc_num else 'No OCLC#'}")
+        print("   URL:", response.url)
+
+    except Exception as e:
+        print(f"❌ Error for {title}: {e}")
+        results.append({
+            "Local_Title": title,
+            "OCLC_Number": "",
+            "OCLC_Title": ""
+        })
+
+# Save results to Excel
+out_df = pd.DataFrame(results)
+out_df.to_excel(output_file, index=False)
+
+print(f"\n✅ Finished! Results saved to {os.path.join(os.getcwd(), output_file)}")
